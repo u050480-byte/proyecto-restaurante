@@ -12,7 +12,7 @@ export interface StaffMember {
   pinCode?: string; // Waiter secret PIN access (e.g. 4 digits)
 }
 
-export type TableStatus = 'disponible' | 'ocupada' | 'esperando_comida' | 'servida' | 'por_cobrar';
+export type TableStatus = 'disponible' | 'ocupada' | 'esperando_comida' | 'servida' | 'por_cobrar' | 'reservada';
 
 export interface RestaurantTable {
   id: string; // e.g. "1", "2", "3"
@@ -21,6 +21,23 @@ export interface RestaurantTable {
   status: TableStatus;
   activeOrderId: string | null;
   guestName: string | null;
+}
+
+export interface Customer {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  points: number;
+  visitCount: number;
+  totalSpent: number;
+  purchaseHistory: {
+    dateTime: string;
+    subtotal: number;
+    total: number;
+    saleId: string;
+    orderId: string;
+  }[];
 }
 
 export type MenuCategory = 'entradas' | 'fuertes' | 'bebidas' | 'postres';

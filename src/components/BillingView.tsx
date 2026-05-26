@@ -26,8 +26,14 @@ export const BillingView: React.FC = () => {
     selectedBillingOrderId, 
     setSelectedBillingOrderId,
     currentUser,
-    staff
+    staff,
+    customers
   } = useRestaurant();
+
+  // Active Selected Customer and points states
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
+  const [usePoints, setUsePoints] = useState<boolean>(false);
+  const [pointsRedeemed, setPointsRedeemed] = useState<number>(0);
 
   // Active Selected Order maps to global shared state
   const selectedOrderId = selectedBillingOrderId;
@@ -48,33 +54,30 @@ export const BillingView: React.FC = () => {
   // Receipt printed simulation toggle
   const [printedReceipt, setPrintedReceipt] = useState<boolean>(false);
 
-  // Tip Recipient Allocation custom modes
-  const [tipRecipientMode, setTipRecipientMode] = useState<'serving' | 'collecting' | 'split'>('serving');
-  const [selectedCollectingWaiterId, setSelectedCollectingWaiterId] = useState<string>('');
-
   const activeOrders = orders.filter(o => o.status !== 'pagado');
   const selectedOrder = orders.find(o => o.id === selectedOrderId);
-
-  const activeWaiters = staff.filter(s => s.role === 'Mesero' && s.status === 'Activo');
-  
-  // Dynamic computed collector waiter
-  const actualCollectorWaiterId = selectedCollectingWaiterId || 
-    (currentUser?.role === 'Mesero' ? currentUser.id : (activeWaiters.find(w => w.id !== selectedOrder?.waiterId)?.id || ''));
 
   // Math variables
   const orderSubtotal = selectedOrder 
     ? selectedOrder.items.reduce((sum, item) => sum + (item.price * item.quantity), 0)
     : 0;
 
+  const selectedCustomerObj = customers.find(c => c.id === selectedCustomerId);
+  const maxRedeemablePoints = selectedCustomerObj ? Math.min(selectedCustomerObj.points, orderSubtotal) : 0;
+  
+  // Real points used
+  const actualPointsUsed = usePoints ? Math.min(pointsRedeemed, maxRedeemablePoints) : 0;
+  const finalSubtotal = Math.max(0, orderSubtotal - actualPointsUsed);
+
   const getTipAmount = () => {
     if (useCustomTip) {
       return Number(customTip) || 0;
     }
-    return (orderSubtotal * tipPercent) / 100;
+    return (finalSubtotal * tipPercent) / 100;
   };
 
   const tipAmount = getTipAmount();
-  const orderTotal = orderSubtotal + tipAmount;
+  const orderTotal = finalSubtotal + tipAmount;
 
   // Split calculations
   const perPersonTotal = splitCount > 1 ? orderTotal / splitCount : orderTotal;
@@ -82,41 +85,70 @@ export const BillingView: React.FC = () => {
   // Cash change calculations
   const cashChange = (Number(cashReceived) || 0) - orderTotal;
 
+  // Invoice Ticket PDF generator helper
+  const handleDownloadPDFTicket = () => {
+    if (!selectedOrder) return;
+    
+    const separator = "========================================\n";
+    const line = "----------------------------------------\n";
+    let receiptContent = "";
+    receiptContent += "         ❖ GASTROGEST SOFTWARE ❖        \n";
+    receiptContent += "          Sabor y Tradicion S.A.        \n";
+    receiptContent += "       CDMX, MEXICO - POST CODE: 03020  \n";
+    receiptContent += separator;
+    receiptContent += `TICKET FACTURA FISCAL: ${selectedOrder.id}\n`;
+    receiptContent += `Fecha: ${new Date().toLocaleDateString('es-MX')}  Hora: ${new Date().toLocaleTimeString('es-MX')}\n`;
+    receiptContent += `Mesa: ${selectedOrder.tableNumber}   Mesero: ${selectedOrder.waiterName}\n`;
+    if (selectedCustomerId && selectedCustomerObj) {
+      receiptContent += `Cliente Frecuente: ${selectedCustomerObj.name}\n`;
+      receiptContent += `ID Socio Club: ${selectedCustomerObj.id}\n`;
+    } else {
+      receiptContent += `Cliente: ${selectedOrder.guestName}\n`;
+    }
+    receiptContent += separator;
+    receiptContent += "CANT   PRODUCTO                 IMPORTE \n";
+    receiptContent += line;
+    selectedOrder.items.forEach(item => {
+      const qtyStr = `${item.quantity}x`.padEnd(6);
+      const nameStr = item.name.substring(0, 22).padEnd(24);
+      const priceStr = `$${(item.price * item.quantity).toFixed(2)}`.padStart(8);
+      receiptContent += `${qtyStr}${nameStr}${priceStr}\n`;
+    });
+    receiptContent += separator;
+    receiptContent += `SUBTOTAL PLATILLOS:        $${orderSubtotal.toFixed(2)}\n`;
+    if (usePoints && pointsRedeemed > 0) {
+      receiptContent += `DESCUENTO MONEDERO CLUB:  -$${pointsRedeemed.toFixed(2)}\n`;
+      receiptContent += `SUBTOTAL CON DESCUENTO:    $${finalSubtotal.toFixed(2)}\n`;
+    }
+    receiptContent += `PROPINA VOLUNTARIA:        $${tipAmount.toFixed(2)}\n`;
+    receiptContent += line;
+    receiptContent += `TOTAL COMPLETADO POS:      $${orderTotal.toFixed(2)}\n`;
+    receiptContent += separator;
+    receiptContent += "     MUCHAS GRACIAS POR SU PREFERENCIA  \n";
+    receiptContent += "      GastroGest ERP Software System    \n";
+    
+    // Download TXT represented invoice standard 58mm POS thermal print
+    const blob = new Blob([receiptContent], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Ventas_Ticket_Mesa_${selectedOrder.tableNumber}_${selectedOrder.id}.txt`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   const handleProcessPayment = () => {
     if (!selectedOrder) return;
 
     let tipAllocation = undefined;
     if (tipAmount > 0) {
-      const waiter1Id = selectedOrder.waiterId;
-      const waiter2Id = actualCollectorWaiterId;
-
-      if (tipRecipientMode === 'serving') {
-        tipAllocation = {
-          waiter1Id,
-          waiter1Amount: tipAmount
-        };
-      } else if (tipRecipientMode === 'collecting' && waiter2Id) {
-        tipAllocation = {
-          waiter1Id: waiter2Id,
-          waiter1Amount: tipAmount
-        };
-      } else if (tipRecipientMode === 'split' && waiter2Id && waiter1Id !== waiter2Id) {
-        tipAllocation = {
-          waiter1Id,
-          waiter1Amount: tipAmount / 2,
-          waiter2Id,
-          waiter2Amount: tipAmount / 2
-        };
-      } else {
-        // Fallback or same waiter
-        tipAllocation = {
-          waiter1Id,
-          waiter1Amount: tipAmount
-        };
-      }
+      tipAllocation = {
+        waiter1Id: selectedOrder.waiterId,
+        waiter1Amount: tipAmount
+      };
     }
 
-    checkoutOrder(selectedOrder.id, orderSubtotal, tipAmount, paymentMethod, tipAllocation);
+    checkoutOrder(selectedOrder.id, orderSubtotal, tipAmount, paymentMethod, tipAllocation, selectedCustomerId || undefined, actualPointsUsed);
     setPrintedReceipt(true);
     
     // Clear state
@@ -130,8 +162,9 @@ export const BillingView: React.FC = () => {
     setUseCustomTip(false);
     setCustomTip('');
     setTipPercent(10);
-    setTipRecipientMode('serving');
-    setSelectedCollectingWaiterId('');
+    setSelectedCustomerId('');
+    setUsePoints(false);
+    setPointsRedeemed(0);
   };
 
   return (
@@ -221,6 +254,83 @@ export const BillingView: React.FC = () => {
                 </h3>
               </div>
 
+              {/* CUSTOMER LOYALTY ASSOCIATION FOR REWARDS */}
+              <div className="bg-indigo-50/40 p-4 rounded-xl border border-indigo-100/70 space-y-3">
+                <span className="text-[10px] uppercase font-extrabold tracking-widest text-indigo-750 block leading-none">Club GastroGest & Frecuentes</span>
+                
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <div className="flex-1 space-y-1">
+                    <label className="text-[10px] uppercase font-bold text-neutral-400">Asociar Socio Club</label>
+                    <select
+                      value={selectedCustomerId}
+                      disabled={printedReceipt}
+                      onChange={(e) => {
+                        setSelectedCustomerId(e.target.value);
+                        setUsePoints(false);
+                        setPointsRedeemed(0);
+                      }}
+                      className="bg-white border border-neutral-200 text-xs text-neutral-800 rounded px-2.5 py-1.5 w-full focus:outline-none"
+                    >
+                      <option value="">-- Comensal General (Sin registrar) --</option>
+                      {customers.map(c => (
+                        <option key={c.id} value={c.id}>
+                          {c.name} ({c.points} pts disponibles)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {selectedCustomerObj && (
+                  <div className="bg-white p-3 rounded-lg border border-indigo-100/70 space-y-2 text-xs">
+                    <div className="flex justify-between items-center">
+                      <span className="font-bold text-neutral-850">
+                        {selectedCustomerObj.name} • <span className="font-mono text-[10px] text-neutral-450">{selectedCustomerObj.id}</span>
+                      </span>
+                      <span className="font-mono text-indigo-700 font-bold bg-indigo-50 border border-indigo-150 px-2 py-0.5 rounded-full text-[10px]">
+                        {selectedCustomerObj.points} pts ($ {selectedCustomerObj.points}.00)
+                      </span>
+                    </div>
+
+                    {selectedCustomerObj.points > 0 ? (
+                      <div className="space-y-2 pt-1 border-t border-indigo-50">
+                        <label className="flex items-center gap-2 font-semibold text-neutral-700 select-none cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={usePoints}
+                            disabled={printedReceipt}
+                            onChange={(e) => {
+                              setUsePoints(e.target.checked);
+                              if (e.target.checked) setPointsRedeemed(selectedCustomerObj.points);
+                            }}
+                            className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                          />
+                          Redimir puntos acumulados en esta comanda
+                        </label>
+                        
+                        {usePoints && (
+                          <div className="flex items-center gap-2 pl-5">
+                            <span className="text-[10px] text-neutral-400">Monto pesos a descontar:</span>
+                            <input
+                              type="number"
+                              min="0"
+                              max={maxRedeemablePoints}
+                              disabled={printedReceipt}
+                              value={pointsRedeemed}
+                              onChange={(e) => setPointsRedeemed(Math.min(maxRedeemablePoints, Math.max(0, Number(e.target.value))))}
+                              className="w-24 bg-neutral-50 px-2 py-1 text-xs font-mono font-bold text-neutral-800 rounded border focus:outline-none"
+                            />
+                            <span className="text-[10px] text-neutral-450 italic">(Máx útil en este ticket: {maxRedeemablePoints} pts)</span>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-[10px] text-indigo-500 font-semibold italic">Este comensal no posee saldo de recompensa disponible. Recibirá un reintegro del 10% de su subtotal con el pago exitoso.</p>
+                    )}
+                  </div>
+                )}
+              </div>
+
               {!printedReceipt ? (
                 <>
                   {/* TIP SELECTION ZONE */}
@@ -273,97 +383,19 @@ export const BillingView: React.FC = () => {
                       )}
                     </div>
 
-                    {/* TIP RECIPIENT ALLOCATION BLOCK (2 Waiters System) */}
+                    {/* TIP RECIPIENT LOUDSPEAKER (No modifications permitted as they stay assigned to serving waiter) */}
                     {tipAmount > 0 && (
-                      <div className="mt-3.5 p-3.5 bg-indigo-50/50 border border-indigo-100 rounded-xl space-y-3">
+                      <div className="mt-3.5 p-3.5 bg-neutral-50 border border-neutral-200 rounded-xl space-y-2">
                         <div className="flex justify-between items-center">
-                          <label className="text-xs font-bold text-indigo-950 flex items-center gap-1.5">
-                            <Sparkles className="w-3.5 h-3.5 text-indigo-500 animate-pulse" />
-                            Asignación de Propina (${tipAmount.toFixed(2)})
+                          <label className="text-xs font-bold text-neutral-800 flex items-center gap-1.5">
+                            <Sparkles className="w-3.5 h-3.5 text-neutral-500" />
+                            Propina Asignada (${tipAmount.toFixed(2)})
                           </label>
-                          <span className="text-[9px] bg-indigo-100 text-indigo-800 px-1.5 py-0.5 rounded-sm font-bold font-mono tracking-wide">COBRO DE PROPINAS</span>
+                          <span className="text-[9px] bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-md font-bold font-mono tracking-wide">MESERO ASIGNADO</span>
                         </div>
-
-                        <div className="grid grid-cols-3 gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setTipRecipientMode('serving')}
-                            className={`p-2.5 rounded-lg border text-left cursor-pointer transition-all flex flex-col justify-between h-[78px] ${
-                              tipRecipientMode === 'serving'
-                                ? 'bg-indigo-600 border-indigo-600 text-white shadow-xs'
-                                : 'bg-white border-neutral-250 hover:bg-neutral-50 text-neutral-800'
-                            }`}
-                          >
-                            <span className="text-[8px] uppercase tracking-wider font-extrabold opacity-75">100% Atendió</span>
-                            <span className="text-[11px] font-black truncate max-w-full leading-snug mt-0.5">
-                              {selectedOrder.waiterName}
-                            </span>
-                            <span className="text-[10px] font-mono font-black mt-0.5">
-                              ${tipAmount.toFixed(2)}
-                            </span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => setTipRecipientMode('collecting')}
-                            className={`p-2.5 rounded-lg border text-left cursor-pointer transition-all flex flex-col justify-between h-[78px] ${
-                              tipRecipientMode === 'collecting'
-                                ? 'bg-indigo-600 border-indigo-600 text-white shadow-xs'
-                                : 'bg-white border-neutral-250 hover:bg-neutral-50 text-neutral-800'
-                            }`}
-                          >
-                            <span className="text-[8px] uppercase tracking-wider font-extrabold opacity-75">100% Cobró</span>
-                            <span className="text-[11px] font-black truncate max-w-full leading-snug mt-0.5">
-                              {staff.find(s => s.id === actualCollectorWaiterId)?.name || 'Elegir Mesero'}
-                            </span>
-                            <span className="text-[10px] font-mono font-black mt-0.5">
-                              ${tipAmount.toFixed(2)}
-                            </span>
-                          </button>
-
-                          {selectedOrder.waiterId !== actualCollectorWaiterId && actualCollectorWaiterId ? (
-                            <button
-                              type="button"
-                              onClick={() => setTipRecipientMode('split')}
-                              className={`p-2.5 rounded-lg border text-left cursor-pointer transition-all flex flex-col justify-between h-[78px] ${
-                                tipRecipientMode === 'split'
-                                  ? 'bg-indigo-600 border-indigo-600 text-white shadow-xs'
-                                  : 'bg-white border-neutral-250 hover:bg-neutral-50 text-neutral-800'
-                              }`}
-                            >
-                              <span className="text-[8px] uppercase tracking-wider font-extrabold opacity-75">Mitad y Mitad</span>
-                              <span className="text-[11px] font-black leading-none mt-0.5">
-                                Ambos Meseros
-                              </span>
-                              <span className="text-[10px] font-mono font-black mt-0.5">
-                                ${(tipAmount / 2).toFixed(2)} c/u
-                              </span>
-                            </button>
-                          ) : (
-                            <div className="p-2 border border-neutral-150 bg-neutral-50 rounded-lg flex flex-col items-center justify-center text-center text-[9px] text-neutral-400 font-bold h-[78px] leading-tight select-none">
-                              Comensal atendido y cobrado por el mismo mesero
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Dropdown to switch or pick the collecting waiter if needed */}
-                        <div className="flex items-center gap-2 pt-2 border-t border-indigo-100/50">
-                          <span className="text-[10px] font-bold text-neutral-500 whitespace-nowrap">Registrar cobro para:</span>
-                          <select
-                            value={actualCollectorWaiterId}
-                            onChange={(e) => {
-                              setSelectedCollectingWaiterId(e.target.value);
-                            }}
-                            className="bg-white border border-neutral-200 rounded px-2 py-1 text-[11px] font-semibold text-neutral-700 bg-none focus:outline-none flex-1"
-                          >
-                            <option value="">Seleccionar Mesero encargado...</option>
-                            {activeWaiters.map((w) => (
-                              <option key={w.id} value={w.id}>
-                                {w.name} {w.id === currentUser?.id ? '(Tú)' : ''}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
+                        <p className="text-xs text-neutral-500 leading-normal">
+                          El 100% de la propina (${tipAmount.toFixed(2)}) se destina de forma directa al mesero responsable que abrió la comanda: <span className="font-bold text-neutral-800">{selectedOrder.waiterName}</span>.
+                        </p>
                       </div>
                     )}
                   </div>
@@ -473,34 +505,15 @@ export const BillingView: React.FC = () => {
 
                   <div className="bg-neutral-50 p-4 rounded-xl text-xs font-mono text-neutral-600 border space-y-2 text-left">
                     <div className="flex justify-between items-center pb-2 border-b border-neutral-150 font-sans">
-                      <span className="font-bold text-neutral-800">Distribución de Propina:</span>
-                      <span className="font-black text-indigo-750 font-mono">${tipAmount.toFixed(2)}</span>
+                       <span className="font-bold text-neutral-800">Distribución de Propina:</span>
+                       <span className="font-black text-indigo-750 font-mono">${tipAmount.toFixed(2)}</span>
                     </div>
                     {tipAmount <= 0 ? (
                       <span className="text-neutral-450 block text-center py-1 font-sans">Sin propina asignada en esta cuenta.</span>
-                    ) : tipRecipientMode === 'serving' ? (
-                      <div className="flex justify-between items-center text-[11px] pt-1">
-                        <span>Para Mesero de Mesa ({selectedOrder.waiterName}):</span>
-                        <span className="font-bold text-neutral-950">${tipAmount.toFixed(2)}</span>
-                      </div>
-                    ) : tipRecipientMode === 'collecting' ? (
-                      <div className="flex justify-between items-center text-[11px] pt-1">
-                        <span>Para Mesero que Cobró ({staff.find(s => s.id === actualCollectorWaiterId)?.name || 'Cajero'}):</span>
-                        <span className="font-bold text-neutral-950">${tipAmount.toFixed(2)}</span>
-                      </div>
                     ) : (
-                      <div className="space-y-1.5 text-[11px] pt-1">
-                        <div className="flex justify-between items-center">
-                          <span>Mesa ({selectedOrder.waiterName}):</span>
-                          <span className="font-bold text-neutral-950">${(tipAmount / 2).toFixed(2)}</span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <span>Cobro ({staff.find(s => s.id === actualCollectorWaiterId)?.name || 'Cajero'}):</span>
-                          <span className="font-bold text-neutral-950">${(tipAmount / 2).toFixed(2)}</span>
-                        </div>
-                        <div className="text-[10px] text-center text-indigo-600 bg-indigo-50 font-bold border border-indigo-100 rounded-sm py-0.5 mt-1 font-sans">
-                          ¡Propinas guardadas para cada uno de los meseros!
-                        </div>
+                      <div className="flex justify-between items-center text-[11px] pt-1 font-sans">
+                        <span>Para Mesero de Mesa ({selectedOrder.waiterName}):</span>
+                        <span className="font-bold text-neutral-950 font-mono">${tipAmount.toFixed(2)}</span>
                       </div>
                     )}
                   </div>
@@ -543,14 +556,6 @@ export const BillingView: React.FC = () => {
                       <span>Atendió:</span>
                       <span className="font-bold truncate max-w-[120px]">{selectedOrder.waiterName}</span>
                     </div>
-                    {actualCollectorWaiterId && staff.find(s => s.id === actualCollectorWaiterId)?.name !== selectedOrder.waiterName && (
-                      <div className="flex justify-between">
-                        <span>Cobró:</span>
-                        <span className="font-bold truncate max-w-[120px]">
-                          {staff.find(s => s.id === actualCollectorWaiterId)?.name}
-                        </span>
-                      </div>
-                    )}
                     <div className="flex justify-between text-neutral-400">
                       <span>Impreso:</span>
                       <span>{new Date().toLocaleDateString('es-MX')}</span>
@@ -575,6 +580,12 @@ export const BillingView: React.FC = () => {
                       <span>Subtotal Alimentos:</span>
                       <span>${orderSubtotal.toFixed(2)}</span>
                     </div>
+                    {actualPointsUsed > 0 && (
+                      <div className="flex justify-between text-rose-600 font-bold">
+                        <span>Descuento Monedero Club:</span>
+                        <span>-${actualPointsUsed.toFixed(2)}</span>
+                      </div>
+                    )}
                     <div className="flex justify-between text-neutral-500">
                       <span>Propina voluntaria ({useCustomTip ? 'custom' : `${tipPercent}%`}):</span>
                       <span>${tipAmount.toFixed(2)}</span>
@@ -612,6 +623,17 @@ export const BillingView: React.FC = () => {
                     <p className="mt-0.5 italic">GastroGest ERP Software System</p>
                   </div>
                 </div>
+              </div>
+
+              {/* Action standard receipt printable trigger */}
+              <div className="px-1 text-center py-1">
+                <button
+                  onClick={handleDownloadPDFTicket}
+                  className="w-full text-center py-2 bg-neutral-900 hover:bg-black text-white text-xs font-bold rounded-xl cursor-pointer flex items-center justify-center gap-1.5 shadow-md hover:shadow-lg transition-all"
+                >
+                  <Receipt className="w-3.5 h-3.5" />
+                  Descargar Ticket PDF (Fiscal)
+                </button>
               </div>
 
               <div className="text-center">

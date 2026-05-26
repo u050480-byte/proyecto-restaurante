@@ -7,6 +7,7 @@ import { ChefView } from './components/ChefView';
 import { MenuView } from './components/MenuView';
 import { BillingView } from './components/BillingView';
 import { StaffView } from './components/StaffView';
+import { CustomersView } from './components/CustomersView';
 import { LoginView } from './components/LoginView';
 
 import { 
@@ -36,26 +37,36 @@ const MainLayout: React.FC = () => {
   const cookingTicketCount = orders.filter(o => o.status === 'en_preparacion').length;
   const activeChefsCount = staff.filter(s => s.role === 'Chef' && s.status === 'Activo').length;
 
-  // Filter navigation items base on current user role. Waiters only can manage tables (mesas), orders (comandas), and checkouts (cobros)
-  const isWaiter = currentUser.role === 'Mesero';
+  const userRole = currentUser.role;
+
+  const allowedViewsByRole: Record<string, string[]> = {
+    'Administrador': ['dashboard', 'mesas', 'comandas', 'cocina', 'menu', 'cobros', 'personal', 'clientes'],
+    'Mesero': ['mesas', 'comandas', 'cocina', 'cobros'],
+    'Chef': ['cocina'],
+    'Cajero': ['cobros']
+  };
+
+  const allowed = allowedViewsByRole[userRole] || ['mesas'];
 
   const allNavigationItems = [
     { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="w-4 h-4" />, desc: 'Métricas y Ventas' },
-    { id: 'mesas', label: 'Mesas y Clientes', icon: <Grid className="w-4 h-4" />, desc: 'Salón y Asientos' },
+    { id: 'mesas', label: 'Mesas y Estado', icon: <Grid className="w-4 h-4" />, desc: 'Salón y Asientos' },
     { id: 'comandas', label: 'Comandas', icon: <ShoppingBag className="w-4 h-4" />, desc: 'Pedidos Mesa' },
     { id: 'cocina', label: 'Cocina (Chef)', icon: <Flame className="w-4 h-4" />, desc: 'KDS Cocineros' },
     { id: 'menu', label: 'Platillos (Menú)', icon: <Utensils className="w-4 h-4" />, desc: 'Carta y Precios' },
     { id: 'cobros', label: 'Cobros POS', icon: <DollarSign className="w-4 h-4" />, desc: 'Caja y Facturas' },
     { id: 'personal', label: 'Roster Personal', icon: <Contact className="w-4 h-4" />, desc: 'Meseros y Turnos' },
+    { id: 'clientes', label: 'Club de Clientes', icon: <Users className="w-4 h-4" />, desc: 'Puntos y Registro' },
   ];
 
-  const navigationItems = isWaiter 
-    ? allNavigationItems.filter(item => ['mesas', 'comandas', 'cobros'].includes(item.id))
-    : allNavigationItems;
+  const navigationItems = allNavigationItems.filter(item => allowed.includes(item.id));
 
   const renderActiveView = () => {
-    // Waiter route guard block
-    if (isWaiter && !['mesas', 'comandas', 'cobros'].includes(activeView)) {
+    // Role route guard block
+    if (!allowed.includes(activeView)) {
+      const fallback = allowed[0];
+      if (fallback === 'cocina') return <ChefView />;
+      if (fallback === 'cobros') return <BillingView />;
       return <TablesView />;
     }
 
@@ -74,8 +85,10 @@ const MainLayout: React.FC = () => {
         return <BillingView />;
       case 'personal':
         return <StaffView />;
+      case 'clientes':
+        return <CustomersView />;
       default:
-        return isWaiter ? <TablesView /> : <DashboardView />;
+        return allowed.includes('dashboard') ? <DashboardView /> : <TablesView />;
     }
   };
 

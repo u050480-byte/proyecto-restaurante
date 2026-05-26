@@ -1,4 +1,4 @@
-import { StaffMember, RestaurantTable, MenuItem, Order, Sale } from './types';
+import { StaffMember, RestaurantTable, MenuItem, Order, Sale, Customer } from './types';
 
 export const initialStaff: StaffMember[] = [
   { id: 'st1', name: 'Carlos Mendoza', role: 'Chef', status: 'Activo', phone: '555-0199', avatar: 'https://images.unsplash.com/photo-1577219491135-ce391730fb2c?auto=format&fit=crop&q=80&w=200', tipsEarned: 0, pinCode: '1111' },
@@ -251,5 +251,54 @@ export const initialSales: Sale[] = [
     total: 860,
     paymentMethod: 'Tarjeta',
     dateTime: '2026-05-20T16:05:00Z'
+  }
+];
+
+export const initialCustomers: Customer[] = [
+  {
+    id: 'c1',
+    name: 'Roberto Díaz',
+    email: 'roberto@gmail.com',
+    phone: '555-0321',
+    points: 120,
+    visitCount: 6,
+    totalSpent: 1850,
+    purchaseHistory: [
+      { dateTime: '2026-05-20T12:30:00Z', subtotal: 510, total: 561, saleId: 'sal1', orderId: 'ord-past-1' }
+    ]
+  },
+  {
+    id: 'c2',
+    name: 'Karla Jiménez',
+    email: 'karla.j@hotmail.com',
+    phone: '555-0812',
+    points: 250,
+    visitCount: 4,
+    totalSpent: 3420,
+    purchaseHistory: [
+      { dateTime: '2026-05-20T14:15:00Z', subtotal: 1120, total: 1288, saleId: 'sal2', orderId: 'ord-past-2' }
+    ]
+  },
+  {
+    id: 'c3',
+    name: 'Sonia Vega',
+    email: 'svega@yahoo.com',
+    phone: '555-0433',
+    points: 80,
+    visitCount: 3,
+    totalSpent: 980,
+    purchaseHistory: [
+      { dateTime: '2026-05-20T15:10:00Z', subtotal: 435, total: 480, saleId: 'sal3', orderId: 'ord-past-3' }
+    ]
+  },
+  {
+    id: 'c4',
+    name: 'Alejandro Ruiz',
+    email: 'aruiz@cetis.edu.mx',
+    phone: '555-5241',
+    points: 400,
+    visitCount: 12,
+    totalSpent: 6200,
+    purchaseHistory: []
   }
 ];

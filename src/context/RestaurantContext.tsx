@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { StaffMember, RestaurantTable, MenuItem, Order, Sale, OrderStatus, OrderItemStatus, PaymentMethod, TableStatus, MenuCategory, StaffRole } from '../types';
-import { initialStaff, initialTables, initialMenu, initialOrders, initialSales } from '../mockData';
+import { StaffMember, RestaurantTable, MenuItem, Order, Sale, OrderStatus, OrderItemStatus, PaymentMethod, TableStatus, MenuCategory, StaffRole, Customer } from '../types';
+import { initialStaff, initialTables, initialMenu, initialOrders, initialSales, initialCustomers } from '../mockData';
 
 interface RestaurantContextType {
   staff: StaffMember[];
@@ -51,8 +51,14 @@ interface RestaurantContextType {
       waiter1Amount: number;
       waiter2Id?: string;
       waiter2Amount?: number;
-    }
+    },
+    customerId?: string,
+    pointsRedeemed?: number
   ) => void;
+
+  // Customers actions
+  customers: Customer[];
+  addCustomer: (customer: Omit<Customer, 'id' | 'points' | 'visitCount' | 'totalSpent' | 'purchaseHistory'>) => void;
 }
 
 const RestaurantContext = createContext<RestaurantContextType | undefined>(undefined);
@@ -82,6 +88,11 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [sales, setSales] = useState<Sale[]>(() => {
     const saved = localStorage.getItem('rest_sales');
     return saved ? JSON.parse(saved) : initialSales;
+  });
+
+  const [customers, setCustomers] = useState<Customer[]>(() => {
+    const saved = localStorage.getItem('rest_customers');
+    return saved ? JSON.parse(saved) : initialCustomers;
   });
 
   const [activeView, setActiveView] = useState<string>('dashboard');
@@ -117,6 +128,10 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   useEffect(() => {
     localStorage.setItem('rest_sales', JSON.stringify(sales));
   }, [sales]);
+
+  useEffect(() => {
+    localStorage.setItem('rest_customers', JSON.stringify(customers));
+  }, [customers]);
 
   const login = (id: string, pin: string): { success: boolean; error?: string } => {
     if (id === 'admin') {
@@ -304,7 +319,24 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const updateOrderStatus = (orderId: string, status: OrderStatus) => {
-    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status } : o));
+    setOrders(prev => prev.map(o => {
+      if (o.id !== orderId) return o;
+      
+      let updatedItems = [...o.items];
+      if (status === 'en_preparacion') {
+        updatedItems = o.items.map(item => ({ ...item, status: 'preparando' as OrderItemStatus }));
+      } else if (status === 'listo_para_servir') {
+        updatedItems = o.items.map(item => ({ ...item, status: 'listo' as OrderItemStatus }));
+      } else if (status === 'entregado') {
+        updatedItems = o.items.map(item => ({ ...item, status: 'servido' as OrderItemStatus }));
+      }
+      
+      return {
+        ...o,
+        status,
+        items: updatedItems
+      };
+    }));
     
     // Auto-update table status based on order status
     const order = orders.find(o => o.id === orderId);
@@ -382,6 +414,19 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     } : t));
   };
 
+  // --- CUSTOMER ACTIONS ---
+  const addCustomer = (custData: Omit<Customer, 'id' | 'points' | 'visitCount' | 'totalSpent' | 'purchaseHistory'>) => {
+    const newCustomer: Customer = {
+      ...custData,
+      id: `c${Date.now()}`,
+      points: 0,
+      visitCount: 0,
+      totalSpent: 0,
+      purchaseHistory: []
+    };
+    setCustomers(prev => [newCustomer, ...prev]);
+  };
+
   // --- BILLING / COBROS ACTIONS ---
   const checkoutOrder = (
     orderId: string, 
@@ -393,12 +438,18 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       waiter1Amount: number;
       waiter2Id?: string;
       waiter2Amount?: number;
-    }
+    },
+    customerId?: string,
+    pointsRedeemed: number = 0
   ) => {
     const order = orders.find(o => o.id === orderId);
     if (!order) return;
 
-    const total = subtotal + tip;
+    // Apply point values as absolute cash discount: 1 point = $1.00 mxn
+    const discount = pointsRedeemed; 
+    const finalSubtotal = Math.max(0, subtotal - discount);
+    const total = finalSubtotal + tip;
+    
     const saleId = `sal${Date.now()}`;
     const newSale: Sale = {
       id: saleId,
@@ -407,7 +458,7 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       guestName: order.guestName,
       waiterName: order.waiterName,
       itemsCount: order.items.reduce((sum, item) => sum + item.quantity, 0),
-      subtotal,
+      subtotal: finalSubtotal,
       tip,
       total,
       paymentMethod,
@@ -419,6 +470,32 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
     // Update order status to paid
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: 'pagado' } : o));
+
+    // Handle customer loyalty registration, point subtraction, spend stats and earned rewards
+    if (customerId) {
+      setCustomers(prev => prev.map(c => {
+        if (c.id !== customerId) return c;
+        // Earn 10% on paid subtotal
+        const earnedPoints = Math.round(finalSubtotal * 0.1);
+        const nextPoints = Math.max(0, c.points - discount + earnedPoints);
+        return {
+          ...c,
+          points: nextPoints,
+          visitCount: c.visitCount + 1,
+          totalSpent: c.totalSpent + total,
+          purchaseHistory: [
+            ...c.purchaseHistory,
+            {
+              dateTime: new Date().toISOString(),
+              subtotal: finalSubtotal,
+              total,
+              saleId,
+              orderId
+            }
+          ]
+        };
+      }));
+    }
 
     // Release table
     setTables(prev => prev.map(t => t.id === order.tableId ? {
@@ -480,7 +557,9 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       updateOrderStatus,
       updateOrderItemStatus,
       cancelOrder,
-      checkoutOrder
+      checkoutOrder,
+      customers,
+      addCustomer
     }}>
       {children}
     </RestaurantContext.Provider>

@@ -15,7 +15,8 @@ import {
   Coffee,
   ListCollapse,
   Check,
-  Soup
+  Soup,
+  DollarSign
 } from 'lucide-react';
 
 export const OrderView: React.FC = () => {
@@ -29,7 +30,8 @@ export const OrderView: React.FC = () => {
     updateOrderStatus, 
     cancelOrder,
     setActiveView,
-    setSelectedBillingOrderId
+    setSelectedBillingOrderId,
+    currentUser
   } = useRestaurant();
 
   // Selected Order for modification / detail view
@@ -38,7 +40,10 @@ export const OrderView: React.FC = () => {
   // New Order Creation Form toggles
   const [showNewOrderModal, setShowNewOrderModal] = useState(false);
   const [selectedTableId, setSelectedTableId] = useState('');
-  const [selectedWaiterId, setSelectedWaiterId] = useState('');
+  const [selectedWaiterId, setSelectedWaiterId] = useState(() => {
+    if (currentUser?.role === 'Mesero') return currentUser.id;
+    return localStorage.getItem('gastro_fixed_waiter_id') || '';
+  });
   const [clientName, setClientName] = useState('');
 
   // Cart/Basket for adding new items
@@ -75,7 +80,6 @@ export const OrderView: React.FC = () => {
     setBasket([]);
     setShowNewOrderModal(false);
     setSelectedTableId('');
-    setSelectedWaiterId('');
     setClientName('');
   };
 
@@ -139,12 +143,9 @@ export const OrderView: React.FC = () => {
       setTimeout(() => {
         // Clear active ordering state
         setBasket([]);
-        setActiveOrderId(null);
         setSendingFeedback(null);
-
-        // Pre-select this order ID inside billing view & transition view
-        setSelectedBillingOrderId(savedOrderId);
-        setActiveView('cobros');
+        // Direct transition to Kitchen (Cocina) View to initiate preparation
+        setActiveView('cocina');
       }, 1600);
 
     }, 1100);
@@ -202,7 +203,7 @@ export const OrderView: React.FC = () => {
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-neutral-800 text-[10px] font-bold font-mono tracking-wider text-neutral-400 border border-neutral-700 animate-pulse">
               {sendingFeedback === 'sending' 
                 ? 'Conectando con Servidor Cocina...' 
-                : 'Redirigiendo a Caja de cobros...'}
+                : 'Redirigiendo a la Cocina...'}
             </span>
           </div>
         </div>
@@ -251,7 +252,13 @@ export const OrderView: React.FC = () => {
                 <label className="text-[10px] uppercase font-bold text-neutral-400">Mesero de Piso</label>
                 <select
                   value={selectedWaiterId}
-                  onChange={(e) => setSelectedWaiterId(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setSelectedWaiterId(val);
+                    if (val) {
+                      localStorage.setItem('gastro_fixed_waiter_id', val);
+                    }
+                  }}
                   className="w-full text-xs rounded-lg border border-neutral-200 px-2.5 py-2 bg-white"
                   required
                 >
@@ -398,6 +405,62 @@ export const OrderView: React.FC = () => {
                     <Check className="w-3.5 h-3.5" />
                     Servida
                   </button>
+                </div>
+              </div>
+
+              {/* Dynamic Step-by-Step Preparation Transition tracker */}
+              <div className="bg-neutral-50 border rounded-xl p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-neutral-400 block tracking-widest leading-none mb-1">Paso de Comanda</span>
+                  <div className="flex items-center gap-2">
+                    {getOrderStatusBadge(selectedOrderObj.status)}
+                    <span className="text-xs text-neutral-500 font-semibold">Mesa {selectedOrderObj.tableNumber}</span>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+                  {selectedOrderObj.status === 'pendiente' && (
+                    <button
+                      onClick={() => updateOrderStatus(selectedOrderObj.id, 'en_preparacion')}
+                      className="flex-1 sm:flex-none px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-lg flex items-center justify-center gap-1.5 cursor-pointer shadow-md transition-all"
+                    >
+                      <Utensils className="w-3.5 h-3.5" />
+                      Preparar Pedido
+                    </button>
+                  )}
+
+                  {selectedOrderObj.status === 'en_preparacion' && (
+                    <button
+                      onClick={() => updateOrderStatus(selectedOrderObj.id, 'listo_para_servir')}
+                      className="flex-1 sm:flex-none px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg flex items-center justify-center gap-1.5 cursor-pointer shadow-md transition-all"
+                    >
+                      <CheckCircle className="w-3.5 h-3.5 animate-bounce" />
+                      Terminar (Listo)
+                    </button>
+                  )}
+
+                  {selectedOrderObj.status === 'listo_para_servir' && (
+                    <button
+                      onClick={() => updateOrderStatus(selectedOrderObj.id, 'entregado')}
+                      className="flex-1 sm:flex-none px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-lg flex items-center justify-center gap-1.5 cursor-pointer shadow-md transition-all"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      Entregar a Mesa
+                    </button>
+                  )}
+
+                  {(selectedOrderObj.status === 'listo_para_servir' || selectedOrderObj.status === 'entregado') && (
+                    <button
+                      onClick={() => {
+                        setSelectedBillingOrderId(selectedOrderObj.id);
+                        setActiveView('cobros');
+                      }}
+                      className="flex-1 sm:flex-none px-3 py-1.5 bg-neutral-900 hover:bg-black text-white font-bold text-xs rounded-lg flex items-center justify-center gap-1.5 cursor-pointer shadow-sm transition-all text-center"
+                    >
+                      <DollarSign className="w-3.5 h-3.5 text-rose-400" />
+                      Proceder a Cobrar
+                    </button>
+                  )}
                 </div>
               </div>
 

@@ -16,14 +16,17 @@ import {
 } from 'lucide-react';
 
 export const TablesView: React.FC = () => {
-  const { tables, staff, orders, addTable, occupyTable, releaseTable, updateTableStatus, setActiveView } = useRestaurant();
+  const { tables, staff, orders, addTable, occupyTable, releaseTable, updateTableStatus, setActiveView, currentUser } = useRestaurant();
   const [showAddForm, setShowAddForm] = useState(false);
   const [seatsCount, setSeatsCount] = useState<number>(4);
   
   // Seating form state
   const [selectedTable, setSelectedTable] = useState<RestaurantTable | null>(null);
   const [guestName, setGuestName] = useState('');
-  const [assignedWaiterId, setAssignedWaiterId] = useState('');
+  const [assignedWaiterId, setAssignedWaiterId] = useState(() => {
+    if (currentUser?.role === 'Mesero') return currentUser.id;
+    return localStorage.getItem('gastro_fixed_waiter_id') || '';
+  });
 
   const activeWaiters = staff.filter(s => s.role === 'Mesero' && s.status === 'Activo');
 
@@ -42,10 +45,9 @@ export const TablesView: React.FC = () => {
     
     occupyTable(selectedTable.id, guestName, assignedWaiterId);
     
-    // Reset seating form
+    // Reset seating form without clearing the responsible waiter selection
     setSelectedTable(null);
     setGuestName('');
-    setAssignedWaiterId('');
   };
 
   // Helper to extract table status colors and labels
@@ -193,7 +195,13 @@ export const TablesView: React.FC = () => {
                   <label className="text-xs font-semibold text-neutral-500 block">Mesero Responsable</label>
                   <select
                     value={assignedWaiterId}
-                    onChange={(e) => setAssignedWaiterId(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setAssignedWaiterId(val);
+                      if (val) {
+                        localStorage.setItem('gastro_fixed_waiter_id', val);
+                      }
+                    }}
                     className="w-full text-sm rounded-lg border border-neutral-200 px-3 py-2 bg-white focus:outline-none focus:border-neutral-900"
                     required
                   >
